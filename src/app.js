@@ -150,8 +150,6 @@ export function createApp() {
                 //    若这里仍弹「你有一条新消息」→ 用户点进去聊天里却什么都没有 = 假通知。
                 //    失败靠手机端轮询 / 控制台 WARN 暴露即可，不打扰用户。
                 if (item.error) return;
-                const subs = await sub.list(inboxId);
-                if (!subs.length) return;
                 const title = meta?.charName || '糯叽机';
                 // 🔒 通知隐私模式（手机端 meta 带来）：正文换「你有一条新消息」，标题/头像保留。
                 const bodies = meta?.notifPrivacy
@@ -174,10 +172,10 @@ export function createApp() {
                         conversationId: `${item.userId}_${item.charId}`,
                         mutableContent: true,
                     };
-                    for (const s of subs) {
-                        const res = await dispatchPush(c.env, s, payload);
-                        if (res?.gone) await sub.remove(inboxId, s);
-                    }
+                    
+                    // 🚀 直接调用企业微信推送，不再检查订阅状态
+                    await dispatchPush(c.env, {}, payload);
+                    
                     i++;
                 }
             } catch (e) {
@@ -464,8 +462,8 @@ export function createApp() {
         return c.json({ ok: true });
     });
 
-    // 走线下剧情：暂停/恢复该 inbox 的所有主动生成。
-    // 手机端走线下时心跳式 pause（带 durationMs 自动过期，防没发 resume 永久哑火），退出时 resume。
+    // 走路下线意图：暂停/恢复 inbox 的所有主动生成。
+    // 手机端走下线时心跳暂停（带 durationMs 自动过期），防止没发 resume 永不响应，退出时 resume。
     app.post('/proactive/pause', async (c) => {
         let body;
         try { body = await c.req.json(); } catch { return c.json({ error: 'invalid json' }, 400); }
