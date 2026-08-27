@@ -158,7 +158,10 @@ class KvProactiveStore {
         const pairKey = makePairKey(rec.inboxId, rec.userId, rec.charId);
         const key = `p:${pairKey}`;
         const prevRaw = await this.kv.get(key);
-        const prev = prevRaw ? JSON.parse(prevRaw) : {};
+        let prev = {};
+        if (prevRaw) {
+            try { prev = JSON.parse(prevRaw); } catch { prev = {}; }
+        }
         await this.kv.put(key, JSON.stringify({ ...prev, ...rec, updatedAt: rec.updatedAt || Date.now() }));
         await this._addToIdx(pairKey);
     }
