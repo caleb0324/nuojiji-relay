@@ -141,13 +141,32 @@ export function createApp() {
         }
         await outbox.put(inboxId, item);
 
+        // 🚀 阿昼中继：企业微信机器人推送 (解决国产系统杀后台问题，完全免费无限量)
+        try {
+            if (!item.error) {
+                const wxurl = c.env.WECHAT_WEBHOOK_URL || 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=12415e03-8ac0-461a-9409-e2d8a02d8c78';
+                const charName = meta?.charName || '糯叽机';
+                const bodies = meta?.notifPrivacy ? extractPushBodies(item.content).map(() => '你有一条新消息') : extractPushBodies(item.content);
+                for (const body of bodies) {
+                    await fetch(wxurl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            msgtype: 'text',
+                            text: { content: `来自 ${charName} 的消息：\n${body}` }
+                        })
+                    }).catch(() => {});
+                }
+            }
+        } catch (e) { console.warn('[WeChatPush] failed', e); }
+
         // 发推送（best-effort，丢了靠手机轮询补）。逐条发：把生成内容拆成各条可见消息，每条发一个带内容的通知，
         // 模拟真人逐条发消息的体验。拆分是通用 JSON-Lines 文本提取（取 {"t":"text","c":"..."} 的可见文本），
         // 不含任何提示词逻辑。标题用角色名（手机随 meta 传来）。
         const pushWork = (async () => {
             try {
                 // ⚠️ 生成失败（502 等）不发推送：手机端排水对 error item 一律丢弃不写气泡，
-                //    若这里仍弹「你有一条新消息」→ 用户点进去聊天里却什么都没有 = 假通知。
+                //    若这里仍弹「你有一条新消息」→ 用户点进去聊天里却什么都没有 =假通知。
                 //    失败靠手机端轮询 / 控制台 WARN 暴露即可，不打扰用户。
                 if (item.error) return;
                 const subs = await sub.list(inboxId);
@@ -286,7 +305,7 @@ export function createApp() {
         }
 
         // ⚠️ test:true「真发测试推送」已停用。
-        //    现象：有客户端(疑似旧版本/后台保活循环)每 5~10 分钟反复调本端点 test:true，
+        //    现象：有客户端(疑似旧版本/后台保活循环)每 5~10 分钟反复调本端点 test:true 
         //    每次对每条订阅各发一条「推送链路自检(带头像)」→ 用户被自检通知轰炸。
         //    诊断本身只需「查订阅是否存在 + 头像 KV 是否在」，不必真发通知。
         //    故无条件不再 dispatch，只回订阅清单 + 头像状态；UI 拿不到 dispatch 时显示「已停用真发」。
@@ -450,50 +469,6 @@ export function createApp() {
                 userId: String(r.userId), charId: String(r.charId),
                 mode: r.mode, enabled: !!r.enabled,
                 updatedAt: r.updatedAt || 0, lastFiredAt: r.lastFiredAt || 0,
-            })),
-        });
-    });
-
-    app.post('/proactive/unregister', async (c) => {
-        let body;
-        try { body = await c.req.json(); } catch { return c.json({ error: 'invalid json' }, 400); }
-        const { inboxId, userId, charId } = body || {};
-        if (!inboxId || userId == null || charId == null) return c.json({ error: 'inboxId / userId / charId required' }, 400);
-        const { proactive } = await getStores(c.env);
-        await proactive.remove(inboxId, String(userId), String(charId));
-        return c.json({ ok: true });
-    });
-
-    // 走路下线意图：暂停/恢复 inbox 的所有主动生成。
-    // 手机端走下线时心跳暂停（带 durationMs 自动过期），防止没发 resume 永不响应，退出时 resume。
-    app.post('/proactive/pause', async (c) => {
-        let body;
-        try { body = await c.req.json(); } catch { return c.json({ error: 'invalid json' }, 400); }
-        const { inboxId, paused, durationMs } = body || {};
-        if (!inboxId) return c.json({ error: 'inboxId required' }, 400);
-        const { proactive } = await getStores(c.env);
-        if (paused === false) {
-            await proactive.setPause(inboxId, 0);
-            return c.json({ ok: true, paused: false });
-        }
-        // 默认 10 分钟，手机端每隔几分钟续期；上限 1 小时防异常长暂停。
-        const dur = Math.min(60 * 60 * 1000, Math.max(60 * 1000, Number(durationMs) || 10 * 60 * 1000));
-        const until = nowMs() + dur;
-        await proactive.setPause(inboxId, until);
-        return c.json({ ok: true, paused: true, pausedUntil: until });
-    });
-
-    app.get('/proactive/status', async (c) => {
-        const inboxId = c.req.query('inboxId');
-        if (!inboxId) return c.json({ error: 'inboxId required' }, 400);
-        const { proactive } = await getStores(c.env);
-        const rows = await proactive.listByInbox(inboxId);
-        // 不回 promptTemplate/key 等敏感内容，只回状态
-        return c.json({
-            pairs: rows.map(r => ({
-                userId: r.userId, charId: r.charId, enabled: r.enabled,
-                windowSize: (r.recentMessages || []).length,
-                lastFiredAt: r.lastFiredAt || 0, updatedAt: r.updatedAt,
             })),
         });
     });
