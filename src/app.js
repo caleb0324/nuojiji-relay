@@ -150,6 +150,8 @@ export function createApp() {
                 //    若这里仍弹「你有一条新消息」→ 用户点进去聊天里却什么都没有 = 假通知。
                 //    失败靠手机端轮询 / 控制台 WARN 暴露即可，不打扰用户。
                 if (item.error) return;
+                const subs = await sub.list(inboxId);
+                if (!subs.length) return;
                 const title = meta?.charName || '糯叽机';
                 // 🔒 通知隐私模式（手机端 meta 带来）：正文换「你有一条新消息」，标题/头像保留。
                 const bodies = meta?.notifPrivacy
@@ -172,10 +174,10 @@ export function createApp() {
                         conversationId: `${item.userId}_${item.charId}`,
                         mutableContent: true,
                     };
-                    
-                    // 🚀 直接调用企业微信推送，不再检查订阅状态
-                    await dispatchPush(c.env, {}, payload);
-                    
+                    for (const s of subs) {
+                        const res = await dispatchPush(c.env, s, payload);
+                        if (res?.gone) await sub.remove(inboxId, s);
+                    }
                     i++;
                 }
             } catch (e) {
