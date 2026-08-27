@@ -319,6 +319,7 @@ export function createApp() {
             return c.json({ error: 'inboxId / userId / charId / promptTemplate / aiSettings required' }, 400);
         }
         const { proactive } = await getStores(c.env);
+        try {
         await proactive.upsert({
             inboxId, userId: String(userId), charId: String(charId),
             mode: mode === 'interval' ? 'interval' : 'impulse',
@@ -338,6 +339,9 @@ export function createApp() {
             avatarUrl: typeof avatarUrl === 'string' ? avatarUrl : null,
             notifPrivacy: !!notifPrivacy,
         });
+        } catch (e) {
+            return c.json({ error: 'register failed', detail: String(e?.message || e), stack: String(e?.stack || '').split('\n').slice(0, 5).join(' | '), storeKind: proactive?.kind }, 500);
+        }
         return c.json({ ok: true });
     });
 
