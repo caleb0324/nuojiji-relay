@@ -1,25 +1,34 @@
-// 推送分发：根据订阅通道选发送器。Phase 1 实做 web，apns/fcm 为 stub。
-//
-// 订阅由手机通过 /api/push/subscribe 注册，按 inboxId 存（复用 outbox 同一存储后端的
-// 一个独立命名空间）。这里只负责「给某 inbox 发叫醒推送」。
-
-import { sendWebPush } from './webPush.js';
-import { sendApns } from './apns.js';
-import { sendFcm } from './fcm.js';
+// 企业微信 Webhook 推送实现
+const WECOM_WEBHOOK = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=12415e03-8ac0-461a-9409-e2d8a02d8c78';
 
 /**
- * @param subscription { channel: 'web'|'apns'|'fcm', ...channel-specific }
+ * 统一分发推送：改为直接发送至企业微信
  */
 export async function dispatchPush(env, subscription, payload) {
-    if (!subscription || !subscription.channel) return { ok: false, reason: 'no-subscription' };
-    switch (subscription.channel) {
-        case 'web':
-            return sendWebPush(env, subscription.sub || subscription, payload);
-        case 'apns':
-            return sendApns(env, subscription, payload);
-        case 'fcm':
-            return sendFcm(env, subscription, payload);
-        default:
-            return { ok: false, reason: `unknown-channel:${subscription.channel}` };
+    // 构造企业微信所需的 Markdown 格式消息
+    const text = `**${payload.title || '糯叽机通知'}**\n\n${payload.body}\n\n> 角色ID: ${payload.charId || '未知'}`;
+
+    try {
+        const res = await fetch(WECOM_WEBHOOK, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                msgtype: 'markdown',
+                markdown: {
+                    content: text
+                }
+            }),
+        });
+
+        if (res.ok) {
+            return { ok: true };
+        } else {
+            const errorText = await res.text();
+            console.error('WeCom push failed:', errorText);
+            return { ok: false, reason: `WeCom HTTP ${res.status}` };
+        }
+    } catch (e) {
+        console.error('WeCom push error:', e);
+        return { ok: false, reason: e.message };
     }
 }
